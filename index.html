@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Patch list UX prototypes — issue #3776</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      .scroll-shell {
+        max-height: 70vh;
+        overflow-y: auto;
+      }
+    </style>
+  </head>
+  <body class="bg-slate-50 text-slate-900 min-h-screen">
+    <div class="max-w-5xl mx-auto p-6">
+      <header class="mb-6">
+        <p class="text-xs uppercase tracking-wide text-slate-500">
+          shorebirdtech/shorebird#3776 — tracks workflow prototype
+        </p>
+        <h1 class="text-2xl font-semibold">Patch list UX explorations</h1>
+        <p class="text-sm text-slate-600 mt-1">
+          Same dataset (196 patches: 1 stable, 183 internal, 12 beta) rendered
+          5 ways. Click a tab to switch.
+        </p>
+      </header>
+
+      <nav id="tabs" class="flex flex-wrap gap-1 mb-4 border-b border-slate-200">
+        <!-- tabs injected by JS -->
+      </nav>
+
+      <section class="bg-white rounded-lg border border-slate-200 shadow-sm">
+        <div class="px-5 py-4 border-b border-slate-200">
+          <div class="flex items-baseline justify-between">
+            <h2 class="text-lg font-medium">Release 1.4.2</h2>
+            <span class="text-xs text-slate-500">
+              Flutter 3.27.1 · created May 10, 2026
+            </span>
+          </div>
+        </div>
+        <div id="variant-host" class="p-5"></div>
+      </section>
+
+      <footer class="mt-6 text-xs text-slate-500">
+        Throwaway mockup — Tailwind via CDN, no real data, no real components.
+      </footer>
+    </div>
+
+    <script>
+      // -------- fake data --------
+      const NOW = Date.now();
+      const MIN = 60 * 1000;
+      const HOUR = 60 * MIN;
+      const DAY = 24 * HOUR;
+
+      // Build a dataset that mirrors the issue's described workload:
+      // - 1 stable patch (3 days old)
+      // - 183 internal patches over the last ~6 days
+      // - 12 beta patches over the last ~14 days
+      // - a couple of rolled-back patches sprinkled in
+      function makePatches() {
+        const patches = [];
+        let n = 800;
+        // beta: oldest
+        for (let i = 0; i < 12; i++) {
+          patches.push({
+            number: n++,
+            track: 'beta',
+            ageMs: (14 - i * 0.7) * DAY,
+            rolledBack: false,
+            artifacts: ['arm64', 'arm'],
+          });
+        }
+        // stable
+        patches.push({
+          number: n++,
+          track: 'stable',
+          ageMs: 3 * DAY,
+          rolledBack: false,
+          artifacts: ['arm64', 'arm'],
+        });
+        // internal: lots
+        for (let i = 0; i < 183; i++) {
+          patches.push({
+            number: n++,
+            track: 'internal',
+            // newest first as we increment n; we'll sort desc later anyway
+            ageMs: Math.max(1 * MIN, (6 * DAY) - i * (6 * DAY / 183)),
+            rolledBack: i === 17 || i === 42, // two rollbacks in history
+            artifacts: ['arm64', 'arm'],
+          });
+        }
+        // sort desc by number — that's how the real list renders
+        patches.sort((a, b) => b.number - a.number);
+        return patches;
+      }
+
+      const ALL_PATCHES = makePatches();
+      const TRACKS = ['stable', 'internal', 'beta'];
+
+      // -------- helpers --------
+      function fmtAge(ms) {
+        if (ms < HOUR) return `${Math.max(1, Math.floor(ms / MIN))}m ago`;
+        if (ms < DAY) return `${Math.floor(ms / HOUR)}h ago`;
+        return `${Math.floor(ms / DAY)}d ago`;
+      }
+
+      function trackBadgeClass(track) {
+        switch (track) {
+          case 'stable':
+            return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+          case 'internal':
+            return 'bg-amber-100 text-amber-800 border-amber-200';
+          case 'beta':
+            return 'bg-sky-100 text-sky-800 border-sky-200';
+          default:
+            return 'bg-slate-100 text-slate-700 border-slate-200';
+        }
+      }
+
+      // The "live" patch on a track is the newest non-rolled-back patch
+      // for that track.
+      function livePerTrack(patches) {
+        const by = {};
+        for (const p of patches) {
+          if (p.rolledBack) continue;
+          if (!by[p.track] || by[p.track].number < p.number) by[p.track] = p;
+        }
+        return by;
+      }
+
+      function statusFor(patch, live) {
+        if (patch.rolledBack) return { label: 'Rolled back', dot: 'bg-red-400' };
+        if (live[patch.track]?.number === patch.number)
+          return { label: 'Active', dot: 'bg-emerald-400' };
+        return { label: 'Inactive', dot: 'bg-slate-300' };
+      }
+
+      // -------- shared row --------
+      function patchRow(patch, live) {
+        const s = statusFor(patch, live);
+        return `
+        <div class="flex items-center justify-between px-4 py-3 hover:bg-slate-50">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="text-base">🤖</span>
+            <span class="font-medium tabular-nums">Patch #${patch.number}</span>
+            <span class="hidden sm:inline text-xs text-slate-500">
+              ${patch.artifacts.map((a) => a.toUpperCase()).join(' · ')}
+            </span>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="inline-flex items-center gap-1.5 text-xs text-slate-600">
+              <span class="inline-block size-2 rounded-full ${s.dot}"></span>
+              ${s.label}
+            </span>
+            <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
+              patch.track,
+            )}">${patch.track}</span>
+            <span class="text-xs text-slate-500 w-16 text-right tabular-nums">
+              ${fmtAge(patch.ageMs)}
+            </span>
+            <button class="text-slate-400 hover:text-slate-700 text-lg leading-none px-1">⋮</button>
+          </div>
+        </div>`;
+      }
+
+      // -------- variants --------
+
+      // 0 — Today (baseline): flat list of every patch.
+      function renderToday(host) {
+        const live = livePerTrack(ALL_PATCHES);
+        host.innerHTML = `
+          <p class="text-sm text-slate-500 mb-3">
+            ${ALL_PATCHES.length} patches, newest first. No track grouping,
+            no filter, no collapse — what ships today.
+          </p>
+          <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
+            ${ALL_PATCHES.map((p) => patchRow(p, live)).join('')}
+          </div>
+        `;
+      }
+
+      // A — Latest-only toggle
+      function renderLatestToggle(host) {
+        const live = livePerTrack(ALL_PATCHES);
+        const liveSet = new Set(Object.values(live).map((p) => p.number));
+        const render = (latestOnly) => {
+          const rows = ALL_PATCHES.filter((p) =>
+            latestOnly ? liveSet.has(p.number) : true,
+          );
+          return `
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-sm text-slate-500">
+                ${rows.length} of ${ALL_PATCHES.length} patches shown
+              </p>
+              <label class="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
+                <input id="latest-toggle" type="checkbox" ${
+                  latestOnly ? 'checked' : ''
+                } class="size-4" />
+                Show only the latest patch per track
+              </label>
+            </div>
+            <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
+              ${rows.map((p) => patchRow(p, live)).join('')}
+            </div>`;
+        };
+        host.innerHTML = render(true);
+        host.querySelector('#latest-toggle').addEventListener('change', (e) => {
+          host.innerHTML = render(e.target.checked);
+          host
+            .querySelector('#latest-toggle')
+            .addEventListener('change', arguments.callee);
+        });
+      }
+
+      // B — Track filter dropdown
+      function renderTrackFilter(host) {
+        const live = livePerTrack(ALL_PATCHES);
+        const render = (selected) => {
+          const rows = ALL_PATCHES.filter(
+            (p) => selected === 'all' || p.track === selected,
+          );
+          const tabs = ['all', ...TRACKS]
+            .map((t) => {
+              const active = t === selected;
+              const count =
+                t === 'all'
+                  ? ALL_PATCHES.length
+                  : ALL_PATCHES.filter((p) => p.track === t).length;
+              return `<button data-track="${t}" class="px-3 py-1.5 rounded-md text-sm ${
+                active
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }">${t}<span class="ml-1.5 text-xs ${
+                active ? 'text-slate-300' : 'text-slate-500'
+              }">${count}</span></button>`;
+            })
+            .join('');
+          return `
+            <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+              <div class="flex flex-wrap gap-1.5">${tabs}</div>
+              <p class="text-sm text-slate-500">
+                ${rows.length} shown
+              </p>
+            </div>
+            <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
+              ${rows.map((p) => patchRow(p, live)).join('')}
+            </div>`;
+        };
+        let current = 'internal';
+        host.innerHTML = render(current);
+        host.addEventListener('click', (e) => {
+          const t = e.target.closest('[data-track]');
+          if (!t) return;
+          current = t.dataset.track;
+          host.innerHTML = render(current);
+        });
+      }
+
+      // C — Track summary card + filterable list below
+      function renderSummaryPlusList(host) {
+        const live = livePerTrack(ALL_PATCHES);
+        let trackFilter = 'all';
+        let latestOnly = false;
+
+        const render = () => {
+          const liveSet = new Set(Object.values(live).map((p) => p.number));
+          let rows = ALL_PATCHES;
+          if (trackFilter !== 'all')
+            rows = rows.filter((p) => p.track === trackFilter);
+          if (latestOnly) rows = rows.filter((p) => liveSet.has(p.number));
+
+          const summaryCards = TRACKS.map((t) => {
+            const p = live[t];
+            const trackCount = ALL_PATCHES.filter((x) => x.track === t).length;
+            const promoteCta =
+              t === 'stable'
+                ? ''
+                : `<button class="mt-3 text-xs font-medium px-2.5 py-1 rounded border border-slate-300 hover:bg-slate-50">
+                     Promote to stable →
+                   </button>`;
+            return `
+              <div class="rounded-lg border border-slate-200 p-4 flex flex-col">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
+                    t,
+                  )}">${t}</span>
+                  <span class="text-xs text-slate-500">${trackCount} total</span>
+                </div>
+                ${
+                  p
+                    ? `<div class="font-medium tabular-nums">Patch #${p.number}</div>
+                       <div class="text-xs text-slate-500 mt-0.5">${fmtAge(
+                         p.ageMs,
+                       )}</div>`
+                    : `<div class="text-sm text-slate-400 italic">No live patch</div>`
+                }
+                ${promoteCta}
+              </div>`;
+          }).join('');
+
+          const tabs = ['all', ...TRACKS]
+            .map((t) => {
+              const active = t === trackFilter;
+              return `<button data-track="${t}" class="px-2.5 py-1 rounded-md text-xs ${
+                active
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }">${t}</button>`;
+            })
+            .join('');
+
+          return `
+            <p class="text-xs uppercase tracking-wide text-slate-500 mb-2">
+              Live on each track
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+              ${summaryCards}
+            </div>
+
+            <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500">Track:</span>
+                <div class="flex gap-1">${tabs}</div>
+              </div>
+              <label class="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
+                <input id="latest-toggle-c" type="checkbox" ${
+                  latestOnly ? 'checked' : ''
+                } class="size-4" />
+                Latest per track only
+              </label>
+            </div>
+            <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
+              ${rows.map((p) => patchRow(p, live)).join('')}
+            </div>`;
+        };
+
+        host.innerHTML = render();
+        host.addEventListener('click', (e) => {
+          const t = e.target.closest('[data-track]');
+          if (!t) return;
+          trackFilter = t.dataset.track;
+          host.innerHTML = render();
+        });
+        host.addEventListener('change', (e) => {
+          if (e.target.id === 'latest-toggle-c') {
+            latestOnly = e.target.checked;
+            host.innerHTML = render();
+          }
+        });
+      }
+
+      // D — Grouped, collapsible sections
+      function renderGrouped(host) {
+        const live = livePerTrack(ALL_PATCHES);
+        const expanded = { stable: true, internal: false, beta: false };
+
+        const render = () => {
+          const sections = TRACKS.map((t) => {
+            const trackPatches = ALL_PATCHES.filter((p) => p.track === t);
+            const isOpen = expanded[t];
+            const visible = isOpen ? trackPatches : trackPatches.slice(0, 1);
+            const hiddenCount = trackPatches.length - visible.length;
+            return `
+              <div class="border border-slate-200 rounded-md">
+                <button data-toggle="${t}" class="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 rounded-t-md">
+                  <div class="flex items-center gap-2">
+                    <span class="text-slate-500">${isOpen ? '▼' : '▶'}</span>
+                    <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
+                      t,
+                    )}">${t}</span>
+                    <span class="text-sm text-slate-700">
+                      ${trackPatches.length} patch${
+                        trackPatches.length === 1 ? '' : 'es'
+                      }
+                    </span>
+                  </div>
+                  <span class="text-xs text-slate-500">
+                    ${
+                      isOpen
+                        ? 'showing all'
+                        : `latest only · ${hiddenCount} hidden`
+                    }
+                  </span>
+                </button>
+                <div class="divide-y divide-slate-100">
+                  ${visible.map((p) => patchRow(p, live)).join('')}
+                </div>
+              </div>`;
+          }).join('<div class="h-3"></div>');
+
+          return `
+            <p class="text-sm text-slate-500 mb-3">
+              One section per track. Latest shown; click a header to expand.
+            </p>
+            <div class="scroll-shell">${sections}</div>
+          `;
+        };
+
+        host.innerHTML = render();
+        host.addEventListener('click', (e) => {
+          const t = e.target.closest('[data-toggle]');
+          if (!t) return;
+          expanded[t.dataset.toggle] = !expanded[t.dataset.toggle];
+          host.innerHTML = render();
+        });
+      }
+
+      // -------- tabs / routing --------
+      const VARIANTS = [
+        { id: 'today', label: 'Today (baseline)', render: renderToday },
+        { id: 'a', label: 'A · Latest-only toggle', render: renderLatestToggle },
+        { id: 'b', label: 'B · Track filter', render: renderTrackFilter },
+        {
+          id: 'c',
+          label: 'C · Summary + list',
+          render: renderSummaryPlusList,
+        },
+        { id: 'd', label: 'D · Grouped sections', render: renderGrouped },
+      ];
+
+      function setActive(id) {
+        const v = VARIANTS.find((x) => x.id === id) || VARIANTS[0];
+        location.hash = v.id;
+        document.querySelectorAll('[data-variant]').forEach((el) => {
+          const isOn = el.dataset.variant === v.id;
+          el.className = isOn
+            ? 'px-4 py-2 text-sm font-medium border-b-2 border-slate-900 text-slate-900'
+            : 'px-4 py-2 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-800';
+        });
+        const host = document.getElementById('variant-host');
+        host.replaceChildren(); // wipe any previously-attached listeners
+        const fresh = document.createElement('div');
+        fresh.id = 'variant-host-inner';
+        host.appendChild(fresh);
+        v.render(fresh);
+      }
+
+      // Render tabs
+      const tabs = document.getElementById('tabs');
+      tabs.innerHTML = VARIANTS.map(
+        (v) =>
+          `<button data-variant="${v.id}" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-800">${v.label}</button>`,
+      ).join('');
+      tabs.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-variant]');
+        if (b) setActive(b.dataset.variant);
+      });
+
+      // Move host element under the variant-host id wrapper for cleanup
+      const initial =
+        (location.hash || '#today').replace('#', '') || 'today';
+      setActive(initial);
+    </script>
+  </body>
+</html>
