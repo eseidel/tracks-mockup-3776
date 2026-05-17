@@ -69,21 +69,21 @@
       // of these platforms.
       const RELEASE_PLATFORMS = ['android', 'ios'];
 
-      // Patches by number → platform set. Default is Android-only since the
-      // customer in #3746 is an AAR add-to-app team and most of their volume
-      // is Android. Sprinkle iOS-only and cross-platform to exercise the
-      // "latest per (track, platform)" story.
+      // Patches by number → platform set. Default is cross-platform: after
+      // Mac's shared-patch-number change, a single patch number commonly
+      // covers both Android and iOS. Platform-specific patches are the
+      // exception, used when a fix only applies to one platform.
       //
-      // Stable carries two patches at different platforms so the per-platform
-      // latest is visibly different — mirroring Mac's "ios: 6 and Android: 7"
-      // example.
-      const CROSS_PLATFORM = new Set([970, 930, 807]);
-      const IOS_ONLY = new Set([812, 989, 975, 845]);
+      // Stable carries one Android-only and one iOS-only patch so the
+      // per-platform latest is visibly different — mirroring Mac's
+      // "ios: 6 and Android: 7" example.
+      const IOS_ONLY = new Set([812, 989, 975]);
+      const ANDROID_ONLY = new Set([813]);
 
       function platformsFor(number) {
-        if (CROSS_PLATFORM.has(number)) return ['android', 'ios'];
         if (IOS_ONLY.has(number)) return ['ios'];
-        return ['android'];
+        if (ANDROID_ONLY.has(number)) return ['android'];
+        return ['android', 'ios'];
       }
 
       // Notes are sparse on purpose — most real patches won't have any.
