@@ -557,13 +557,7 @@
           })
           .join('<div class="h-3"></div>');
 
-        host.innerHTML = `
-          <p class="text-xs text-slate-500 mb-3">
-            One section per track. Each section shows the latest ${CAP}; drill
-            into the Track page for the full history with filters and search.
-          </p>
-          ${sections}
-        `;
+        host.innerHTML = sections;
       }
 
       // E — Track page (drill-down). Default track = internal.
