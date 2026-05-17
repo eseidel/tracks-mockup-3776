@@ -601,23 +601,24 @@
       }
 
       // E — Track page (drill-down). Default track = internal.
-      // Filters/search are auto-shown only when the track has enough patches
-      // to warrant them. Most tracks (a handful of patches) just get the
-      // bucketed list. The high-volume customer in #3776 (100s of internal
-      // patches) gets filters + search without anyone else seeing the chrome.
+      // Filters/search live behind a <details> disclosure that's open by
+      // default once a track has enough patches to make filtering useful
+      // (≥ 5). On a stable track with 2 patches you don't see the chrome
+      // until you click; the customer in #3776 (100s on internal) sees it
+      // open every time.
       function renderTrackPage(host, arg) {
         const track = TRACKS.includes(arg) ? arg : 'internal';
         chromeTrack(track);
         const latest = latestPerTrackPlatform(ALL_PATCHES);
         const trackPatches = patchesByTrack(track);
-        const HEAVY_THRESHOLD = 25;
-        const isHeavy = trackPatches.length > HEAVY_THRESHOLD;
+        const filtersOpenByDefault = trackPatches.length >= 5;
 
         const state = {
           dateRange: 'all',
           status: 'all', // all | latest | rolled-back
           search: '',
           shown: 50,
+          filtersOpen: filtersOpenByDefault,
         };
         const PAGE = 50;
 
@@ -686,9 +687,12 @@
             .map(([k, l]) => chipBtn(k, l, state.status, 'status'))
             .join(' ');
 
-          const filterRig = isHeavy
-            ? `
-              <div class="grid gap-3 mb-4">
+          const filterRig = `
+            <details ${state.filtersOpen ? 'open' : ''} class="mb-3 group">
+              <summary class="cursor-pointer text-xs uppercase tracking-wide text-slate-500 hover:text-slate-700 select-none py-1">
+                Filter &amp; search
+              </summary>
+              <div class="grid gap-3 mt-3">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Date</span>
                   <div class="flex gap-1.5 flex-wrap">${dateChips}</div>
@@ -705,10 +709,7 @@
                     value="${escapeHtml(state.search)}"
                     class="flex-1 min-w-[200px] px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-300" />
                 </div>
-              </div>
-
-              <div class="flex items-center justify-between mb-2 text-xs text-slate-500">
-                <div>
+                <div class="text-xs text-slate-500">
                   Showing ${visible.length} of ${totalMatching}
                   ${
                     totalMatching !== trackPatches.length
@@ -716,9 +717,8 @@
                       : ''
                   }
                 </div>
-                <div>Sorted newest first</div>
-              </div>`
-            : '';
+              </div>
+            </details>`;
 
           return `
             ${filterRig}
@@ -774,6 +774,9 @@
               fresh.focus();
               fresh.setSelectionRange(cursor, cursor);
             }
+          });
+          host.querySelector('details')?.addEventListener('toggle', (e) => {
+            state.filtersOpen = e.target.open;
           });
         };
 
