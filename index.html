@@ -7,8 +7,13 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       .scroll-shell {
-        max-height: 70vh;
+        max-height: 72vh;
         overflow-y: auto;
+      }
+      .bucket-header {
+        position: sticky;
+        top: 0;
+        z-index: 1;
       }
     </style>
   </head>
@@ -21,28 +26,26 @@
         <h1 class="text-2xl font-semibold">Patch list UX explorations</h1>
         <p class="text-sm text-slate-600 mt-1">
           Same dataset (196 patches: 1 stable, 183 internal, 12 beta) rendered
-          5 ways. Click a tab to switch.
+          several ways. D is the current direction; E is the drill-down page
+          you reach by clicking <em>View all on this track</em>.
         </p>
       </header>
 
-      <nav id="tabs" class="flex flex-wrap gap-1 mb-4 border-b border-slate-200">
+      <nav id="tabs" class="flex flex-wrap items-center gap-1 mb-4 border-b border-slate-200">
         <!-- tabs injected by JS -->
       </nav>
 
       <section class="bg-white rounded-lg border border-slate-200 shadow-sm">
-        <div class="px-5 py-4 border-b border-slate-200">
-          <div class="flex items-baseline justify-between">
-            <h2 class="text-lg font-medium">Release 1.4.2</h2>
-            <span class="text-xs text-slate-500">
-              Flutter 3.27.1 · created May 10, 2026
-            </span>
-          </div>
+        <div id="page-chrome" class="px-5 py-4 border-b border-slate-200">
+          <!-- page chrome differs between release detail and track page -->
         </div>
         <div id="variant-host" class="p-5"></div>
       </section>
 
       <footer class="mt-6 text-xs text-slate-500">
         Throwaway mockup — Tailwind via CDN, no real data, no real components.
+        Design choices marked <span class="text-amber-600">(open)</span> are
+        still under discussion.
       </footer>
     </div>
 
@@ -53,11 +56,6 @@
       const HOUR = 60 * MIN;
       const DAY = 24 * HOUR;
 
-      // Build a dataset that mirrors the issue's described workload:
-      // - 1 stable patch (3 days old)
-      // - 183 internal patches over the last ~6 days
-      // - 12 beta patches over the last ~14 days
-      // - a couple of rolled-back patches sprinkled in
       function makePatches() {
         const patches = [];
         let n = 800;
@@ -69,28 +67,27 @@
             ageMs: (14 - i * 0.7) * DAY,
             rolledBack: false,
             artifacts: ['arm64', 'arm'],
+            corrKey: `b${i.toString(16).padStart(4, '0')}`,
           });
         }
-        // stable
         patches.push({
           number: n++,
           track: 'stable',
           ageMs: 3 * DAY,
           rolledBack: false,
           artifacts: ['arm64', 'arm'],
+          corrKey: 's0001',
         });
-        // internal: lots
         for (let i = 0; i < 183; i++) {
           patches.push({
             number: n++,
             track: 'internal',
-            // newest first as we increment n; we'll sort desc later anyway
             ageMs: Math.max(1 * MIN, (6 * DAY) - i * (6 * DAY / 183)),
-            rolledBack: i === 17 || i === 42, // two rollbacks in history
+            rolledBack: i === 17 || i === 42,
             artifacts: ['arm64', 'arm'],
+            corrKey: `i${i.toString(16).padStart(4, '0')}`,
           });
         }
-        // sort desc by number — that's how the real list renders
         patches.sort((a, b) => b.number - a.number);
         return patches;
       }
@@ -118,8 +115,6 @@
         }
       }
 
-      // The "live" patch on a track is the newest non-rolled-back patch
-      // for that track.
       function livePerTrack(patches) {
         const by = {};
         for (const p of patches) {
@@ -136,15 +131,39 @@
         return { label: 'Inactive', dot: 'bg-slate-300' };
       }
 
+      function patchesByTrack(track) {
+        return ALL_PATCHES.filter((p) => p.track === track);
+      }
+
+      function bucketLabel(ageMs) {
+        if (ageMs < DAY) return 'Today';
+        if (ageMs < 2 * DAY) return 'Yesterday';
+        if (ageMs < 7 * DAY) return 'This week';
+        if (ageMs < 30 * DAY) return 'Earlier this month';
+        return 'Older';
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        })[c]);
+      }
+
       // -------- shared row --------
-      function patchRow(patch, live) {
+      function patchRow(patch, live, opts = {}) {
         const s = statusFor(patch, live);
+        const showTrackBadge = opts.showTrackBadge !== false;
         return `
         <div class="flex items-center justify-between px-4 py-3 hover:bg-slate-50">
           <div class="flex items-center gap-3 min-w-0">
             <span class="text-base">🤖</span>
             <span class="font-medium tabular-nums">Patch #${patch.number}</span>
-            <span class="hidden sm:inline text-xs text-slate-500">
+            <span class="hidden md:inline text-xs text-slate-400 tabular-nums">${patch.corrKey}</span>
+            <span class="hidden lg:inline text-xs text-slate-500">
               ${patch.artifacts.map((a) => a.toUpperCase()).join(' · ')}
             </span>
           </div>
@@ -153,9 +172,13 @@
               <span class="inline-block size-2 rounded-full ${s.dot}"></span>
               ${s.label}
             </span>
-            <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
-              patch.track,
-            )}">${patch.track}</span>
+            ${
+              showTrackBadge
+                ? `<span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
+                    patch.track,
+                  )}">${patch.track}</span>`
+                : ''
+            }
             <span class="text-xs text-slate-500 w-16 text-right tabular-nums">
               ${fmtAge(patch.ageMs)}
             </span>
@@ -164,101 +187,332 @@
         </div>`;
       }
 
+      // -------- page chrome --------
+      function chromeRelease() {
+        document.getElementById('page-chrome').innerHTML = `
+          <div class="flex items-baseline justify-between">
+            <h2 class="text-lg font-medium">Release 1.4.2</h2>
+            <span class="text-xs text-slate-500">
+              Flutter 3.27.1 · created May 10, 2026
+            </span>
+          </div>`;
+      }
+
+      function chromeTrack(track) {
+        const live = livePerTrack(ALL_PATCHES);
+        const livePatch = live[track];
+        const count = patchesByTrack(track).length;
+        document.getElementById('page-chrome').innerHTML = `
+          <div class="flex items-center justify-between gap-3 flex-wrap">
+            <div class="flex items-center gap-3 min-w-0">
+              <a href="#d" class="text-xs text-slate-500 hover:text-slate-800">
+                ← Release 1.4.2
+              </a>
+              <span class="text-slate-300">/</span>
+              <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
+                track,
+              )}">${track}</span>
+              <h2 class="text-lg font-medium">Track: ${track}</h2>
+            </div>
+            <div class="text-xs text-slate-500">
+              ${count} patches${
+                livePatch
+                  ? ` · live: <span class="font-medium text-slate-700">#${livePatch.number}</span> · ${fmtAge(
+                      livePatch.ageMs,
+                    )}`
+                  : ''
+              }
+            </div>
+          </div>`;
+      }
+
       // -------- variants --------
 
-      // 0 — Today (baseline): flat list of every patch.
-      function renderToday(host) {
+      // D — Grouped, top-5 per group, drill-down to E
+      function renderGrouped(host) {
+        chromeRelease();
         const live = livePerTrack(ALL_PATCHES);
+        // group order: stable first, then by recency of live patch (newest first)
+        // open question: weight by approx active users for non-stable tracks
+        const orderedTracks = [...TRACKS].sort((a, b) => {
+          if (a === 'stable') return -1;
+          if (b === 'stable') return 1;
+          const la = live[a]?.ageMs ?? Infinity;
+          const lb = live[b]?.ageMs ?? Infinity;
+          return la - lb;
+        });
+
+        const CAP = 5;
+        const sections = orderedTracks
+          .map((t) => {
+            const trackPatches = patchesByTrack(t);
+            const visible = trackPatches.slice(0, CAP);
+            const overflow = trackPatches.length - visible.length;
+            const livePatch = live[t];
+            return `
+              <div class="border border-slate-200 rounded-lg overflow-hidden">
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
+                      t,
+                    )}">${t}</span>
+                    ${
+                      livePatch
+                        ? `<span class="text-sm">
+                             <span class="text-slate-500">live:</span>
+                             <span class="font-medium tabular-nums">#${livePatch.number}</span>
+                             <span class="text-slate-500 ml-1">${fmtAge(
+                               livePatch.ageMs,
+                             )}</span>
+                           </span>`
+                        : `<span class="text-sm text-slate-400 italic">no live patch</span>`
+                    }
+                    ${
+                      t !== 'stable'
+                        ? `<button class="ml-2 text-xs font-medium px-2 py-0.5 rounded border border-slate-300 hover:bg-white">
+                             Promote to stable →
+                           </button>`
+                        : ''
+                    }
+                  </div>
+                  <a href="#e/${t}" class="text-xs font-medium text-sky-700 hover:text-sky-900">
+                    View all ${trackPatches.length} on this track →
+                  </a>
+                </div>
+                <div class="divide-y divide-slate-100">
+                  ${visible
+                    .map((p) => patchRow(p, live, { showTrackBadge: false }))
+                    .join('')}
+                  ${
+                    overflow > 0
+                      ? `<a href="#e/${t}" class="block text-center px-4 py-2 text-xs text-slate-500 hover:bg-slate-50">
+                           ${overflow} more on ${t} →
+                         </a>`
+                      : ''
+                  }
+                </div>
+              </div>`;
+          })
+          .join('<div class="h-3"></div>');
+
         host.innerHTML = `
-          <p class="text-sm text-slate-500 mb-3">
-            ${ALL_PATCHES.length} patches, newest first. No track grouping,
-            no filter, no collapse — what ships today.
+          <p class="text-xs text-slate-500 mb-3">
+            One section per track. Each section shows the latest ${CAP}; drill into
+            the Track page for the full history with filters and search.
           </p>
-          <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
-            ${ALL_PATCHES.map((p) => patchRow(p, live)).join('')}
-          </div>
+          ${sections}
         `;
       }
 
-      // A — Latest-only toggle
-      function renderLatestToggle(host) {
+      // E — Track page (drill-down). Default track = internal.
+      function renderTrackPage(host, arg) {
+        const track = TRACKS.includes(arg) ? arg : 'internal';
+        chromeTrack(track);
         const live = livePerTrack(ALL_PATCHES);
-        const liveSet = new Set(Object.values(live).map((p) => p.number));
-        const render = (latestOnly) => {
-          const rows = ALL_PATCHES.filter((p) =>
-            latestOnly ? liveSet.has(p.number) : true,
-          );
-          return `
-            <div class="flex items-center justify-between mb-3">
-              <p class="text-sm text-slate-500">
-                ${rows.length} of ${ALL_PATCHES.length} patches shown
-              </p>
-              <label class="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
-                <input id="latest-toggle" type="checkbox" ${
-                  latestOnly ? 'checked' : ''
-                } class="size-4" />
-                Show only the latest patch per track
-              </label>
-            </div>
-            <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
-              ${rows.map((p) => patchRow(p, live)).join('')}
-            </div>`;
-        };
-        host.innerHTML = render(true);
-        host.querySelector('#latest-toggle').addEventListener('change', (e) => {
-          host.innerHTML = render(e.target.checked);
-          host
-            .querySelector('#latest-toggle')
-            .addEventListener('change', arguments.callee);
-        });
-      }
 
-      // B — Track filter dropdown
-      function renderTrackFilter(host) {
-        const live = livePerTrack(ALL_PATCHES);
-        const render = (selected) => {
-          const rows = ALL_PATCHES.filter(
-            (p) => selected === 'all' || p.track === selected,
-          );
-          const tabs = ['all', ...TRACKS]
-            .map((t) => {
-              const active = t === selected;
-              const count =
-                t === 'all'
-                  ? ALL_PATCHES.length
-                  : ALL_PATCHES.filter((p) => p.track === t).length;
-              return `<button data-track="${t}" class="px-3 py-1.5 rounded-md text-sm ${
-                active
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }">${t}<span class="ml-1.5 text-xs ${
-                active ? 'text-slate-300' : 'text-slate-500'
-              }">${count}</span></button>`;
-            })
-            .join('');
-          return `
-            <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
-              <div class="flex flex-wrap gap-1.5">${tabs}</div>
-              <p class="text-sm text-slate-500">
-                ${rows.length} shown
-              </p>
-            </div>
-            <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
-              ${rows.map((p) => patchRow(p, live)).join('')}
-            </div>`;
+        const state = {
+          track,
+          dateRange: 'all', // all | today | 7d | 30d
+          status: 'all', // all | active | inactive | rolled-back
+          search: '',
+          shown: 50,
         };
-        let current = 'internal';
-        host.innerHTML = render(current);
+
+        const PAGE = 50;
+
+        const render = () => {
+          const liveSet = new Set(Object.values(live).map((p) => p.number));
+          let rows = ALL_PATCHES.filter((p) =>
+            state.track === 'all' ? true : p.track === state.track,
+          );
+          if (state.dateRange !== 'all') {
+            const limit = {
+              today: DAY,
+              '7d': 7 * DAY,
+              '30d': 30 * DAY,
+            }[state.dateRange];
+            rows = rows.filter((p) => p.ageMs < limit);
+          }
+          if (state.status !== 'all') {
+            rows = rows.filter((p) => {
+              if (state.status === 'active') return liveSet.has(p.number);
+              if (state.status === 'rolled-back') return p.rolledBack;
+              if (state.status === 'inactive')
+                return !liveSet.has(p.number) && !p.rolledBack;
+              return true;
+            });
+          }
+          if (state.search) {
+            const q = state.search.toLowerCase();
+            rows = rows.filter(
+              (p) =>
+                String(p.number).includes(q) ||
+                p.corrKey.toLowerCase().includes(q) ||
+                p.track.includes(q),
+            );
+          }
+
+          const totalMatching = rows.length;
+          const visible = rows.slice(0, state.shown);
+
+          // bucket the visible patches by time
+          const buckets = [];
+          let currentBucket = null;
+          for (const p of visible) {
+            const label = bucketLabel(p.ageMs);
+            if (!currentBucket || currentBucket.label !== label) {
+              currentBucket = { label, rows: [] };
+              buckets.push(currentBucket);
+            }
+            currentBucket.rows.push(p);
+          }
+
+          const chipBtn = (key, label, current, group) =>
+            `<button data-group="${group}" data-value="${key}"
+              class="px-2.5 py-1 rounded-full text-xs border ${
+                current === key
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }">${label}</button>`;
+
+          const trackChips = ['all', ...TRACKS]
+            .map((t) => chipBtn(t, t, state.track, 'track'))
+            .join(' ');
+          const dateChips = [
+            ['all', 'All'],
+            ['today', 'Today'],
+            ['7d', 'Last 7d'],
+            ['30d', 'Last 30d'],
+          ]
+            .map(([k, l]) => chipBtn(k, l, state.dateRange, 'dateRange'))
+            .join(' ');
+          const statusChips = [
+            ['all', 'All'],
+            ['active', 'Active'],
+            ['inactive', 'Inactive'],
+            ['rolled-back', 'Rolled back'],
+          ]
+            .map(([k, l]) => chipBtn(k, l, state.status, 'status'))
+            .join(' ');
+
+          return `
+            <div class="grid gap-3 mb-4">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Track</span>
+                <div class="flex gap-1.5 flex-wrap">${trackChips}</div>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Date</span>
+                <div class="flex gap-1.5 flex-wrap">${dateChips}</div>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">
+                  Status <span class="text-amber-600">(open)</span>
+                </span>
+                <div class="flex gap-1.5 flex-wrap">${statusChips}</div>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Search</span>
+                <input id="search-input"
+                  type="search"
+                  placeholder="Patch #, correlation key, track…"
+                  value="${escapeHtml(state.search)}"
+                  class="flex-1 min-w-[200px] px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-300" />
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between mb-2 text-xs text-slate-500">
+              <div>
+                Showing ${visible.length} of ${totalMatching}
+                ${
+                  totalMatching !== ALL_PATCHES.length
+                    ? `(filtered from ${ALL_PATCHES.length})`
+                    : ''
+                }
+              </div>
+              <div>Sorted newest first</div>
+            </div>
+
+            <div class="scroll-shell border border-slate-200 rounded-md">
+              ${
+                buckets.length === 0
+                  ? `<div class="px-4 py-10 text-center text-sm text-slate-500">
+                       No patches match the current filters.
+                     </div>`
+                  : buckets
+                      .map(
+                        (b) => `
+                          <div class="bucket-header px-4 py-1.5 bg-slate-100 text-xs font-medium text-slate-600 border-b border-slate-200">
+                            ${b.label}
+                            <span class="text-slate-400 font-normal ml-1">
+                              · ${b.rows.length}
+                            </span>
+                          </div>
+                          <div class="divide-y divide-slate-100">
+                            ${b.rows
+                              .map((p) =>
+                                patchRow(p, live, {
+                                  showTrackBadge: state.track === 'all',
+                                }),
+                              )
+                              .join('')}
+                          </div>`,
+                      )
+                      .join('')
+              }
+              ${
+                visible.length < totalMatching
+                  ? `<button id="load-more"
+                       class="block w-full px-4 py-3 text-sm font-medium text-sky-700 hover:bg-slate-50 border-t border-slate-200">
+                       Load ${Math.min(PAGE, totalMatching - visible.length)} more
+                       (${totalMatching - visible.length} remaining)
+                     </button>`
+                  : ''
+              }
+            </div>
+          `;
+        };
+
+        const paint = () => {
+          host.innerHTML = render();
+          host.querySelector('#search-input')?.addEventListener('input', (e) => {
+            state.search = e.target.value;
+            state.shown = PAGE;
+            const cursor = e.target.selectionStart;
+            paint();
+            const fresh = host.querySelector('#search-input');
+            if (fresh) {
+              fresh.focus();
+              fresh.setSelectionRange(cursor, cursor);
+            }
+          });
+        };
+
         host.addEventListener('click', (e) => {
-          const t = e.target.closest('[data-track]');
-          if (!t) return;
-          current = t.dataset.track;
-          host.innerHTML = render(current);
+          const chip = e.target.closest('[data-group]');
+          if (chip) {
+            state[chip.dataset.group] = chip.dataset.value;
+            // Update URL hash if track changed so deep links stay shareable
+            if (chip.dataset.group === 'track') {
+              location.hash = `e/${chip.dataset.value}`;
+              chromeTrack(chip.dataset.value);
+            }
+            state.shown = PAGE;
+            paint();
+            return;
+          }
+          if (e.target.id === 'load-more') {
+            state.shown += PAGE;
+            paint();
+          }
         });
+
+        paint();
       }
 
-      // C — Track summary card + filterable list below
+      // C — Track summary cards + filterable list below
       function renderSummaryPlusList(host) {
+        chromeRelease();
         const live = livePerTrack(ALL_PATCHES);
         let trackFilter = 'all';
         let latestOnly = false;
@@ -272,7 +526,7 @@
 
           const summaryCards = TRACKS.map((t) => {
             const p = live[t];
-            const trackCount = ALL_PATCHES.filter((x) => x.track === t).length;
+            const trackCount = patchesByTrack(t).length;
             const promoteCta =
               t === 'stable'
                 ? ''
@@ -350,107 +604,162 @@
         });
       }
 
-      // D — Grouped, collapsible sections
-      function renderGrouped(host) {
+      // Baseline — flat list of every patch.
+      function renderToday(host) {
+        chromeRelease();
         const live = livePerTrack(ALL_PATCHES);
-        const expanded = { stable: true, internal: false, beta: false };
+        host.innerHTML = `
+          <p class="text-sm text-slate-500 mb-3">
+            ${ALL_PATCHES.length} patches, newest first. No track grouping,
+            no filter, no collapse — what ships today. This is the problem
+            we're solving.
+          </p>
+          <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
+            ${ALL_PATCHES.map((p) => patchRow(p, live)).join('')}
+          </div>
+        `;
+      }
 
+      // A — Latest-only toggle (earlier exploration)
+      function renderLatestToggle(host) {
+        chromeRelease();
+        const live = livePerTrack(ALL_PATCHES);
+        const liveSet = new Set(Object.values(live).map((p) => p.number));
+        let latestOnly = true;
         const render = () => {
-          const sections = TRACKS.map((t) => {
-            const trackPatches = ALL_PATCHES.filter((p) => p.track === t);
-            const isOpen = expanded[t];
-            const visible = isOpen ? trackPatches : trackPatches.slice(0, 1);
-            const hiddenCount = trackPatches.length - visible.length;
-            return `
-              <div class="border border-slate-200 rounded-md">
-                <button data-toggle="${t}" class="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 rounded-t-md">
-                  <div class="flex items-center gap-2">
-                    <span class="text-slate-500">${isOpen ? '▼' : '▶'}</span>
-                    <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
-                      t,
-                    )}">${t}</span>
-                    <span class="text-sm text-slate-700">
-                      ${trackPatches.length} patch${
-                        trackPatches.length === 1 ? '' : 'es'
-                      }
-                    </span>
-                  </div>
-                  <span class="text-xs text-slate-500">
-                    ${
-                      isOpen
-                        ? 'showing all'
-                        : `latest only · ${hiddenCount} hidden`
-                    }
-                  </span>
-                </button>
-                <div class="divide-y divide-slate-100">
-                  ${visible.map((p) => patchRow(p, live)).join('')}
-                </div>
-              </div>`;
-          }).join('<div class="h-3"></div>');
-
+          const rows = ALL_PATCHES.filter((p) =>
+            latestOnly ? liveSet.has(p.number) : true,
+          );
           return `
-            <p class="text-sm text-slate-500 mb-3">
-              One section per track. Latest shown; click a header to expand.
-            </p>
-            <div class="scroll-shell">${sections}</div>
-          `;
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-sm text-slate-500">
+                ${rows.length} of ${ALL_PATCHES.length} patches shown
+              </p>
+              <label class="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
+                <input id="latest-toggle" type="checkbox" ${
+                  latestOnly ? 'checked' : ''
+                } class="size-4" />
+                Show only the latest patch per track
+              </label>
+            </div>
+            <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
+              ${rows.map((p) => patchRow(p, live)).join('')}
+            </div>`;
         };
+        host.innerHTML = render();
+        host.addEventListener('change', (e) => {
+          if (e.target.id === 'latest-toggle') {
+            latestOnly = e.target.checked;
+            host.innerHTML = render();
+          }
+        });
+      }
 
+      // B — Track filter (earlier exploration)
+      function renderTrackFilter(host) {
+        chromeRelease();
+        const live = livePerTrack(ALL_PATCHES);
+        let current = 'internal';
+        const render = () => {
+          const rows = ALL_PATCHES.filter(
+            (p) => current === 'all' || p.track === current,
+          );
+          const tabs = ['all', ...TRACKS]
+            .map((t) => {
+              const active = t === current;
+              const count =
+                t === 'all'
+                  ? ALL_PATCHES.length
+                  : patchesByTrack(t).length;
+              return `<button data-track="${t}" class="px-3 py-1.5 rounded-md text-sm ${
+                active
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }">${t}<span class="ml-1.5 text-xs ${
+                active ? 'text-slate-300' : 'text-slate-500'
+              }">${count}</span></button>`;
+            })
+            .join('');
+          return `
+            <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+              <div class="flex flex-wrap gap-1.5">${tabs}</div>
+              <p class="text-sm text-slate-500">
+                ${rows.length} shown
+              </p>
+            </div>
+            <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
+              ${rows.map((p) => patchRow(p, live)).join('')}
+            </div>`;
+        };
         host.innerHTML = render();
         host.addEventListener('click', (e) => {
-          const t = e.target.closest('[data-toggle]');
+          const t = e.target.closest('[data-track]');
           if (!t) return;
-          expanded[t.dataset.toggle] = !expanded[t.dataset.toggle];
+          current = t.dataset.track;
           host.innerHTML = render();
         });
       }
 
       // -------- tabs / routing --------
       const VARIANTS = [
-        { id: 'today', label: 'Today (baseline)', render: renderToday },
-        { id: 'a', label: 'A · Latest-only toggle', render: renderLatestToggle },
-        { id: 'b', label: 'B · Track filter', render: renderTrackFilter },
         {
-          id: 'c',
-          label: 'C · Summary + list',
-          render: renderSummaryPlusList,
+          id: 'd',
+          label: 'D · Grouped (current direction)',
+          render: renderGrouped,
         },
-        { id: 'd', label: 'D · Grouped sections', render: renderGrouped },
+        { id: 'e', label: 'E · Track page', render: renderTrackPage },
+        { id: 'c', label: 'C · Summary cards + list', render: renderSummaryPlusList },
+        { id: 'today', label: 'Today (the problem)', render: renderToday, earlier: true },
+        { id: 'a', label: 'A · Latest-only toggle', render: renderLatestToggle, earlier: true },
+        { id: 'b', label: 'B · Track filter', render: renderTrackFilter, earlier: true },
       ];
 
-      function setActive(id) {
+      function setActive(id, arg) {
         const v = VARIANTS.find((x) => x.id === id) || VARIANTS[0];
-        location.hash = v.id;
+        const newHash = arg ? `${v.id}/${arg}` : v.id;
+        if (location.hash.slice(1) !== newHash) {
+          history.replaceState(null, '', `#${newHash}`);
+        }
         document.querySelectorAll('[data-variant]').forEach((el) => {
           const isOn = el.dataset.variant === v.id;
+          const base = 'px-4 py-2 text-sm font-medium border-b-2 transition-colors';
+          const dim = el.dataset.earlier === 'true' ? ' opacity-70' : '';
           el.className = isOn
-            ? 'px-4 py-2 text-sm font-medium border-b-2 border-slate-900 text-slate-900'
-            : 'px-4 py-2 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-800';
+            ? `${base} border-slate-900 text-slate-900`
+            : `${base} border-transparent text-slate-500 hover:text-slate-800${dim}`;
         });
         const host = document.getElementById('variant-host');
-        host.replaceChildren(); // wipe any previously-attached listeners
+        host.replaceChildren();
         const fresh = document.createElement('div');
         fresh.id = 'variant-host-inner';
         host.appendChild(fresh);
-        v.render(fresh);
+        v.render(fresh, arg);
       }
 
       // Render tabs
       const tabs = document.getElementById('tabs');
-      tabs.innerHTML = VARIANTS.map(
-        (v) =>
-          `<button data-variant="${v.id}" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-800">${v.label}</button>`,
-      ).join('');
+      let renderedSep = false;
+      tabs.innerHTML = VARIANTS.map((v) => {
+        let sep = '';
+        if (v.earlier && !renderedSep) {
+          renderedSep = true;
+          sep = `<span class="px-3 text-xs uppercase tracking-wide text-slate-400">Earlier exploration</span>`;
+        }
+        return `${sep}<button data-variant="${v.id}" data-earlier="${!!v.earlier}" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-800">${v.label}</button>`;
+      }).join('');
       tabs.addEventListener('click', (e) => {
         const b = e.target.closest('[data-variant]');
         if (b) setActive(b.dataset.variant);
       });
 
-      // Move host element under the variant-host id wrapper for cleanup
-      const initial =
-        (location.hash || '#today').replace('#', '') || 'today';
-      setActive(initial);
+      function applyHash() {
+        const raw = (location.hash || '#d').replace('#', '');
+        const [id, ...rest] = raw.split('/');
+        setActive(id || 'd', rest.join('/') || undefined);
+      }
+
+      window.addEventListener('hashchange', applyHash);
+      applyHash();
     </script>
   </body>
 </html>
