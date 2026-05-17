@@ -601,26 +601,29 @@
       }
 
       // E — Track page (drill-down). Default track = internal.
+      // Filters/search are auto-shown only when the track has enough patches
+      // to warrant them. Most tracks (a handful of patches) just get the
+      // bucketed list. The high-volume customer in #3776 (100s of internal
+      // patches) gets filters + search without anyone else seeing the chrome.
       function renderTrackPage(host, arg) {
         const track = TRACKS.includes(arg) ? arg : 'internal';
         chromeTrack(track);
         const latest = latestPerTrackPlatform(ALL_PATCHES);
+        const trackPatches = patchesByTrack(track);
+        const HEAVY_THRESHOLD = 25;
+        const isHeavy = trackPatches.length > HEAVY_THRESHOLD;
 
         const state = {
-          track,
           dateRange: 'all',
           status: 'all', // all | latest | rolled-back
           search: '',
           shown: 50,
         };
-
         const PAGE = 50;
 
         const render = () => {
           const latestNumbers = latestNumberSet(latest);
-          let rows = ALL_PATCHES.filter((p) =>
-            state.track === 'all' ? true : p.track === state.track,
-          );
+          let rows = trackPatches;
           if (state.dateRange !== 'all') {
             const limit = {
               today: DAY,
@@ -640,7 +643,6 @@
               (p) =>
                 String(p.number).includes(q) ||
                 p.corrKey.toLowerCase().includes(q) ||
-                p.track.includes(q) ||
                 (p.privateNotes || '').toLowerCase().includes(q) ||
                 (p.publicNotes || '').toLowerCase().includes(q),
             );
@@ -668,9 +670,6 @@
                   : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
               }">${label}</button>`;
 
-          const trackChips = ['all', ...TRACKS]
-            .map((t) => chipBtn(t, t, state.track, 'track'))
-            .join(' ');
           const dateChips = [
             ['all', 'All'],
             ['today', 'Today'],
@@ -687,47 +686,51 @@
             .map(([k, l]) => chipBtn(k, l, state.status, 'status'))
             .join(' ');
 
+          const filterRig = isHeavy
+            ? `
+              <div class="grid gap-3 mb-4">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Date</span>
+                  <div class="flex gap-1.5 flex-wrap">${dateChips}</div>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Status</span>
+                  <div class="flex gap-1.5 flex-wrap">${statusChips}</div>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Search</span>
+                  <input id="search-input"
+                    type="search"
+                    placeholder="Patch #, correlation key, notes content…"
+                    value="${escapeHtml(state.search)}"
+                    class="flex-1 min-w-[200px] px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-300" />
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between mb-2 text-xs text-slate-500">
+                <div>
+                  Showing ${visible.length} of ${totalMatching}
+                  ${
+                    totalMatching !== trackPatches.length
+                      ? `(filtered from ${trackPatches.length})`
+                      : ''
+                  }
+                </div>
+                <div>Sorted newest first</div>
+              </div>`
+            : '';
+
           return `
-            <div class="grid gap-3 mb-4">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Track</span>
-                <div class="flex gap-1.5 flex-wrap">${trackChips}</div>
-              </div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Date</span>
-                <div class="flex gap-1.5 flex-wrap">${dateChips}</div>
-              </div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Status</span>
-                <div class="flex gap-1.5 flex-wrap">${statusChips}</div>
-              </div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Search</span>
-                <input id="search-input"
-                  type="search"
-                  placeholder="Patch #, correlation key, track, notes content…"
-                  value="${escapeHtml(state.search)}"
-                  class="flex-1 min-w-[200px] px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-300" />
-              </div>
-            </div>
-
-            <div class="flex items-center justify-between mb-2 text-xs text-slate-500">
-              <div>
-                Showing ${visible.length} of ${totalMatching}
-                ${
-                  totalMatching !== ALL_PATCHES.length
-                    ? `(filtered from ${ALL_PATCHES.length})`
-                    : ''
-                }
-              </div>
-              <div>Sorted newest first</div>
-            </div>
-
+            ${filterRig}
             <div class="scroll-shell border border-slate-200 rounded-md">
               ${
                 buckets.length === 0
                   ? `<div class="px-4 py-10 text-center text-sm text-slate-500">
-                       No patches match the current filters.
+                       ${
+                         trackPatches.length === 0
+                           ? 'No patches on this track yet.'
+                           : 'No patches match the current filters.'
+                       }
                      </div>`
                   : buckets
                       .map(
@@ -740,11 +743,7 @@
                           </div>
                           <div class="divide-y divide-slate-100">
                             ${b.rows
-                              .map((p) =>
-                                patchRow(p, latest, {
-                                  showTrackBadge: state.track === 'all',
-                                }),
-                              )
+                              .map((p) => patchRow(p, latest, { showTrackBadge: false }))
                               .join('')}
                           </div>`,
                       )
@@ -782,10 +781,6 @@
           const chip = e.target.closest('[data-group]');
           if (chip) {
             state[chip.dataset.group] = chip.dataset.value;
-            if (chip.dataset.group === 'track') {
-              location.hash = `e/${chip.dataset.value}`;
-              chromeTrack(chip.dataset.value);
-            }
             state.shown = PAGE;
             paint();
             return;
