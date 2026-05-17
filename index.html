@@ -1088,7 +1088,6 @@
           ? `<section>
                <h3 class="text-xs uppercase tracking-wide text-slate-500 mb-1">
                  Private notes
-                 <span class="text-slate-400 normal-case font-normal ml-1">— org only</span>
                </h3>
                <pre class="text-sm whitespace-pre-wrap font-sans bg-slate-50 border border-slate-200 rounded p-3">${escapeHtml(patch.privateNotes)}</pre>
              </section>`
@@ -1106,7 +1105,7 @@
                  <h3 class="text-xs uppercase tracking-wide text-slate-500">
                    <span class="text-emerald-700">📡</span> Public notes
                    <span class="text-slate-400 normal-case font-normal ml-1">
-                     — shipped to devices · ${patch.publicNotes.length} / 4096 chars
+                     ${patch.publicNotes.length} / 4096 chars
                    </span>
                  </h3>
                  <button class="text-xs text-sky-700 hover:underline">Edit →</button>
@@ -1116,9 +1115,6 @@
           : `<section>
                <h3 class="text-xs uppercase tracking-wide text-slate-500 mb-1">
                  <span class="text-emerald-700">📡</span> Public notes
-                 <span class="text-slate-400 normal-case font-normal ml-1">
-                   — shipped to devices
-                 </span>
                </h3>
                <div class="text-sm text-slate-400 italic">
                  No public notes —
