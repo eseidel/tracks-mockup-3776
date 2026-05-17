@@ -25,9 +25,9 @@
         </p>
         <h1 class="text-2xl font-semibold">Patch list UX explorations</h1>
         <p class="text-sm text-slate-600 mt-1">
-          Same dataset (196 patches: 1 stable, 183 internal, 12 beta) rendered
-          several ways. D is the current direction; E is the drill-down page
-          you reach by clicking <em>View all on this track</em>.
+          Same dataset rendered several ways. D is the current direction; E is
+          the drill-down page reached via <em>View all</em>. The mock release
+          supports Android + iOS.
         </p>
       </header>
 
@@ -52,7 +52,8 @@
           Patch name = first line of private notes when present.
           <span class="text-emerald-700">📡</span> = public notes (free-form
           text payload shipped to devices via the patch check response, per the
-          Public Patch Notes PRD).
+          Public Patch Notes PRD). Patches are <em>latest</em>, <em>rolled
+          back</em>, or just normal — latest is computed per (track, platform).
         </p>
       </footer>
     </div>
@@ -64,32 +65,59 @@
       const HOUR = 60 * MIN;
       const DAY = 24 * HOUR;
 
+      // The release this mock is for. Patches against it can cover any subset
+      // of these platforms.
+      const RELEASE_PLATFORMS = ['android', 'ios'];
+
+      // Patches by number → platform set. Default is Android-only since the
+      // customer in #3746 is an AAR add-to-app team and most of their volume
+      // is Android. Sprinkle iOS-only and cross-platform to exercise the
+      // "latest per (track, platform)" story.
+      //
+      // Stable carries two patches at different platforms so the per-platform
+      // latest is visibly different — mirroring Mac's "ios: 6 and Android: 7"
+      // example.
+      const CROSS_PLATFORM = new Set([970, 930, 807]);
+      const IOS_ONLY = new Set([812, 989, 975, 845]);
+
+      function platformsFor(number) {
+        if (CROSS_PLATFORM.has(number)) return ['android', 'ios'];
+        if (IOS_ONLY.has(number)) return ['ios'];
+        return ['android'];
+      }
+
       // Notes are sparse on purpose — most real patches won't have any.
-      // privateNotes: visible to the org's console users only.
+      // privateNotes: visible to the org's console users only (existing DB column).
       // publicNotes: free-form text shipped to devices via the patch check
       //   response, read by the customer's app off `Patch.publicNotes`.
       //   Customer-defined format (plain text / JSON / markdown / tier flag).
-      //   Per the Public Patch Notes PRD.
+      //   Per the Public Patch Notes PRD (proposed, not in DB today).
       const NOTES = {
-        // stable — tier flag + banner copy, structured JSON
-        995: {
+        // stable Android — promoted from internal with structured device payload
+        813: {
           privateNotes:
-            'Customer-blocking fix — promoted from internal #983\nValidated by QA on May 14',
+            'Promoted from internal #978\nValidated by Android QA May 14',
           publicNotes:
             '{"severity":"critical","banner":"Apply security update"}',
         },
+        // stable iOS — older, single-word tier flag
+        812: {
+          privateNotes:
+            'Promoted from internal #971\nValidated by iOS QA May 11',
+          publicNotes: 'critical',
+        },
         // newest internal — being curated for promotion
-        994: {
+        995: {
           privateNotes: 'Smoke test before promoting to stable',
           publicNotes: '',
         },
-        991: {
+        993: {
           privateNotes:
             'Trying new dart_ffi flags / probably won’t promote',
           publicNotes: '',
         },
         // fix that ALC-style customer would tag as critical
-        981: {
+        980: {
           privateNotes:
             'Fix crash reported by support\n(see ticket #4218)',
           publicNotes: 'critical',
@@ -98,7 +126,7 @@
           privateNotes: 'QA test for the nav redesign — Aisha',
           publicNotes: 'stealth',
         },
-        920: {
+        922: {
           privateNotes: 'Build with experimental compression',
           publicNotes: 'standard',
         },
@@ -107,7 +135,7 @@
           privateNotes: 'Failed manual QA — keep for postmortem',
           publicNotes: '',
         },
-        // beta with public-facing notes only — markdown
+        // beta with public-facing notes only — markdown, cross-platform
         807: {
           privateNotes: '',
           publicNotes:
@@ -115,37 +143,55 @@
         },
       };
 
+      // Numbering:
+      //   beta:     800..811 (12)
+      //   stable:   812..813 (2 — iOS-only and Android-only, see Mac's example)
+      //   internal: 814..995 (182)
       function makePatches() {
         const patches = [];
         let n = 800;
         // beta: oldest
         for (let i = 0; i < 12; i++) {
           patches.push({
-            number: n++,
+            number: n,
             track: 'beta',
             ageMs: (14 - i * 0.7) * DAY,
             rolledBack: false,
-            artifacts: ['arm64', 'arm'],
+            platforms: platformsFor(n),
             corrKey: `b${i.toString(16).padStart(4, '0')}`,
           });
+          n++;
         }
+        // stable iOS — older
         patches.push({
-          number: n++,
+          number: n,
           track: 'stable',
-          ageMs: 3 * DAY,
+          ageMs: 5 * DAY,
           rolledBack: false,
-          artifacts: ['arm64', 'arm'],
+          platforms: platformsFor(n), // iOS-only via IOS_ONLY
           corrKey: 's0001',
         });
-        for (let i = 0; i < 183; i++) {
+        n++;
+        // stable Android — newer
+        patches.push({
+          number: n,
+          track: 'stable',
+          ageMs: 2 * DAY,
+          rolledBack: false,
+          platforms: platformsFor(n), // Android default
+          corrKey: 's0002',
+        });
+        n++;
+        for (let i = 0; i < 182; i++) {
           patches.push({
-            number: n++,
+            number: n,
             track: 'internal',
-            ageMs: Math.max(1 * MIN, (6 * DAY) - i * (6 * DAY / 183)),
+            ageMs: Math.max(1 * MIN, (6 * DAY) - i * (6 * DAY / 182)),
             rolledBack: i === 17 || i === 42,
-            artifacts: ['arm64', 'arm'],
+            platforms: platformsFor(n),
             corrKey: `i${i.toString(16).padStart(4, '0')}`,
           });
+          n++;
         }
         for (const p of patches) {
           const note = NOTES[p.number];
@@ -184,20 +230,81 @@
         }
       }
 
-      function livePerTrack(patches) {
+      function platformIcon(p) {
+        switch (p) {
+          case 'android':
+            return '🤖';
+          case 'ios':
+            return '🍎';
+          case 'macos':
+            return '🖥️';
+          case 'windows':
+            return '🪟';
+          default:
+            return '?';
+        }
+      }
+
+      function platformLabel(p) {
+        return (
+          { android: 'Android', ios: 'iOS', macos: 'macOS', windows: 'Windows' }[p] ?? p
+        );
+      }
+
+      function platformsHtml(patch) {
+        return patch.platforms
+          .map(
+            (p) =>
+              `<span title="${platformLabel(p)}" class="leading-none">${platformIcon(p)}</span>`,
+          )
+          .join('');
+      }
+
+      // For each (track, platform), the newest non-rolled-back patch that
+      // covers that platform. Returns { track: { platform: patch } }.
+      function latestPerTrackPlatform(patches) {
         const by = {};
         for (const p of patches) {
           if (p.rolledBack) continue;
-          if (!by[p.track] || by[p.track].number < p.number) by[p.track] = p;
+          for (const platform of p.platforms) {
+            by[p.track] ??= {};
+            const cur = by[p.track][platform];
+            if (!cur || cur.number < p.number) by[p.track][platform] = p;
+          }
         }
         return by;
       }
 
-      function statusFor(patch, live) {
-        if (patch.rolledBack) return { label: 'Rolled back', dot: 'bg-red-400' };
-        if (live[patch.track]?.number === patch.number)
-          return { label: 'Active', dot: 'bg-emerald-400' };
-        return { label: 'Inactive', dot: 'bg-slate-300' };
+      function latestNumberSet(latest) {
+        const s = new Set();
+        for (const t of Object.values(latest)) {
+          for (const p of Object.values(t)) s.add(p.number);
+        }
+        return s;
+      }
+
+      // A patch is "latest" if it's the newest non-rolled-back patch on at
+      // least one platform of its track. If it covers multiple platforms and
+      // is latest on a subset, label the subset.
+      function statusFor(patch, latest) {
+        if (patch.rolledBack) {
+          return { kind: 'rolled-back', label: 'Rolled back', dot: 'bg-red-400' };
+        }
+        const trackLatest = latest[patch.track] || {};
+        const livePlatforms = patch.platforms.filter(
+          (plat) => trackLatest[plat]?.number === patch.number,
+        );
+        if (livePlatforms.length === 0) {
+          return { kind: 'normal' };
+        }
+        if (livePlatforms.length === patch.platforms.length) {
+          return { kind: 'latest', label: 'Latest', dot: 'bg-emerald-400' };
+        }
+        return {
+          kind: 'partial-latest',
+          label: `Latest on ${livePlatforms.map(platformLabel).join(', ')}`,
+          dot: 'bg-emerald-400',
+        };
       }
 
       function patchesByTrack(track) {
@@ -222,22 +329,49 @@
         })[c]);
       }
 
+      // Render the latest-by-platform summary for a track. Collapses to a
+      // single entry when the same patch number is latest on every platform.
+      // Returns html (string).
+      function latestSummaryHtml(trackLatest) {
+        const entries = Object.entries(trackLatest);
+        if (entries.length === 0) {
+          return `<span class="text-slate-400 italic">no patches yet</span>`;
+        }
+        // Group platforms by the patch they share
+        const byNumber = new Map();
+        for (const [platform, p] of entries) {
+          if (!byNumber.has(p.number)) {
+            byNumber.set(p.number, { patch: p, platforms: [] });
+          }
+          byNumber.get(p.number).platforms.push(platform);
+        }
+        const items = [...byNumber.values()].sort(
+          (a, b) => a.patch.ageMs - b.patch.ageMs,
+        );
+        return items
+          .map(
+            ({ patch, platforms }) => `
+              <span class="inline-flex items-center gap-1.5">
+                <span>${platforms.map(platformIcon).join('')}</span>
+                <span class="font-medium tabular-nums">#${patch.number}</span>
+                <span class="text-slate-500">${fmtAge(patch.ageMs)}</span>
+              </span>`,
+          )
+          .join('<span class="text-slate-300 mx-1.5">·</span>');
+      }
+
       // -------- shared row --------
       function publicNotesPreview(s) {
         if (!s) return '';
-        // Collapse whitespace and clip to ~40 chars so JSON/markdown/single
-        // words all read as a glanceable preview.
         const flat = s.replace(/\s+/g, ' ').trim();
         return flat.length > 40 ? flat.slice(0, 39) + '…' : flat;
       }
 
-      function patchRow(patch, live, opts = {}) {
-        const s = statusFor(patch, live);
+      function patchRow(patch, latest, opts = {}) {
+        const s = statusFor(patch, latest);
         const showTrackBadge = opts.showTrackBadge !== false;
         const name = patchName(patch);
         const hasPublic = !!patch.publicNotes;
-        const hasPrivate = !!patch.privateNotes;
-        const arts = patch.artifacts.map((a) => a.toUpperCase()).join(' · ');
 
         // Primary identifier on top line
         const primary = name
@@ -246,26 +380,19 @@
             )}">“${escapeHtml(name)}”</span>`
           : `<span class="font-medium tabular-nums shrink-0">Patch #${patch.number}</span>`;
 
-        // Secondary line shown when either:
-        //   - the name is primary (so we need to expose patch # + corrKey)
-        //   - there's a public-notes payload to preview
+        // Secondary line shown when name is primary, or there's a public-notes
+        // payload to preview.
         const showSecondary = name || hasPublic;
         const secondaryBits = [];
         if (name) {
           secondaryBits.push(
             `<span class="tabular-nums">#${patch.number}</span>`,
             `<span class="tabular-nums text-slate-400">${patch.corrKey}</span>`,
-            `<span class="hidden lg:inline">${arts}</span>`,
           );
-        } else {
-          // primary is "Patch #N" — only put corr/arts on secondary if we need it
-          // for the public-notes line; otherwise we leave them next to the primary
-          if (hasPublic) {
-            secondaryBits.push(
-              `<span class="tabular-nums text-slate-400">${patch.corrKey}</span>`,
-              `<span class="hidden lg:inline">${arts}</span>`,
-            );
-          }
+        } else if (hasPublic) {
+          secondaryBits.push(
+            `<span class="tabular-nums text-slate-400">${patch.corrKey}</span>`,
+          );
         }
         if (hasPublic) {
           secondaryBits.push(
@@ -279,17 +406,27 @@
           );
         }
 
-        // When name is absent and there are no public notes, fall back to the
-        // original compact single-line layout (which is most rows).
-        const inlineExtras = !name && !hasPublic
-          ? `<span class="hidden md:inline text-xs text-slate-400 tabular-nums">${patch.corrKey}</span>
-             <span class="hidden lg:inline text-xs text-slate-500">${arts}</span>`
-          : '';
+        // When name is absent and there are no public notes, the row stays
+        // compact with corrKey inline (same as today's UI).
+        const inlineExtras =
+          !name && !hasPublic
+            ? `<span class="hidden md:inline text-xs text-slate-400 tabular-nums">${patch.corrKey}</span>`
+            : '';
+
+        // Status pill: only show for latest, partial-latest, or rolled-back.
+        // Normal patches get no pill — they're history.
+        const statusPill =
+          s.kind === 'normal'
+            ? ''
+            : `<span class="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                 <span class="inline-block size-2 rounded-full ${s.dot}"></span>
+                 ${s.label}
+               </span>`;
 
         return `
         <div class="flex items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50">
           <div class="flex items-start gap-3 min-w-0 flex-1">
-            <span class="text-base shrink-0 leading-6">🤖</span>
+            <span class="shrink-0 leading-6 text-base whitespace-nowrap">${platformsHtml(patch)}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 min-w-0">
                 ${primary}
@@ -307,10 +444,7 @@
             </div>
           </div>
           <div class="flex items-center gap-2 shrink-0 pt-0.5">
-            <span class="inline-flex items-center gap-1.5 text-xs text-slate-600">
-              <span class="inline-block size-2 rounded-full ${s.dot}"></span>
-              ${s.label}
-            </span>
+            ${statusPill}
             ${
               showTrackBadge
                 ? `<span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
@@ -328,9 +462,16 @@
 
       // -------- page chrome --------
       function chromeRelease() {
+        const platforms = RELEASE_PLATFORMS.map(
+          (p) =>
+            `<span title="${platformLabel(p)}" class="text-base">${platformIcon(p)}</span>`,
+        ).join('');
         document.getElementById('page-chrome').innerHTML = `
           <div class="flex items-baseline justify-between">
-            <h2 class="text-lg font-medium">Release 1.4.2</h2>
+            <div class="flex items-center gap-2">
+              <h2 class="text-lg font-medium">Release 1.4.2</h2>
+              <span class="leading-none">${platforms}</span>
+            </div>
             <span class="text-xs text-slate-500">
               Flutter 3.27.1 · created May 10, 2026
             </span>
@@ -338,8 +479,8 @@
       }
 
       function chromeTrack(track) {
-        const live = livePerTrack(ALL_PATCHES);
-        const livePatch = live[track];
+        const latest = latestPerTrackPlatform(ALL_PATCHES);
+        const trackLatest = latest[track] || {};
         const count = patchesByTrack(track).length;
         document.getElementById('page-chrome').innerHTML = `
           <div class="flex items-center justify-between gap-3 flex-wrap">
@@ -353,14 +494,10 @@
               )}">${track}</span>
               <h2 class="text-lg font-medium">Track: ${track}</h2>
             </div>
-            <div class="text-xs text-slate-500">
-              ${count} patches${
-                livePatch
-                  ? ` · live: <span class="font-medium text-slate-700">#${livePatch.number}</span> · ${fmtAge(
-                      livePatch.ageMs,
-                    )}`
-                  : ''
-              }
+            <div class="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+              <span>${count} patches</span>
+              <span class="text-slate-300">·</span>
+              <span>Latest: ${latestSummaryHtml(trackLatest)}</span>
             </div>
           </div>`;
       }
@@ -370,15 +507,19 @@
       // D — Grouped, top-5 per group, drill-down to E
       function renderGrouped(host) {
         chromeRelease();
-        const live = livePerTrack(ALL_PATCHES);
-        // group order: stable first, then by recency of live patch (newest first)
-        // open question: weight by approx active users for non-stable tracks
+        const latest = latestPerTrackPlatform(ALL_PATCHES);
+
+        // Order: stable first, then by recency of the freshest latest patch
+        // on the track.
+        const recencyFor = (t) => {
+          const trackLatest = latest[t] || {};
+          const ages = Object.values(trackLatest).map((p) => p.ageMs);
+          return ages.length ? Math.min(...ages) : Infinity;
+        };
         const orderedTracks = [...TRACKS].sort((a, b) => {
           if (a === 'stable') return -1;
           if (b === 'stable') return 1;
-          const la = live[a]?.ageMs ?? Infinity;
-          const lb = live[b]?.ageMs ?? Infinity;
-          return la - lb;
+          return recencyFor(a) - recencyFor(b);
         });
 
         const CAP = 5;
@@ -387,25 +528,18 @@
             const trackPatches = patchesByTrack(t);
             const visible = trackPatches.slice(0, CAP);
             const overflow = trackPatches.length - visible.length;
-            const livePatch = live[t];
+            const trackLatest = latest[t] || {};
             return `
               <div class="border border-slate-200 rounded-lg overflow-hidden">
                 <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 flex-wrap">
-                  <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="flex items-center gap-2.5 min-w-0 flex-wrap">
                     <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${trackBadgeClass(
                       t,
                     )}">${t}</span>
-                    ${
-                      livePatch
-                        ? `<span class="text-sm">
-                             <span class="text-slate-500">live:</span>
-                             <span class="font-medium tabular-nums">#${livePatch.number}</span>
-                             <span class="text-slate-500 ml-1">${fmtAge(
-                               livePatch.ageMs,
-                             )}</span>
-                           </span>`
-                        : `<span class="text-sm text-slate-400 italic">no live patch</span>`
-                    }
+                    <span class="text-sm">
+                      <span class="text-slate-500 mr-1">Latest:</span>
+                      ${latestSummaryHtml(trackLatest)}
+                    </span>
                     ${
                       t !== 'stable'
                         ? `<button class="ml-2 text-xs font-medium px-2 py-0.5 rounded border border-slate-300 hover:bg-white">
@@ -420,7 +554,7 @@
                 </div>
                 <div class="divide-y divide-slate-100">
                   ${visible
-                    .map((p) => patchRow(p, live, { showTrackBadge: false }))
+                    .map((p) => patchRow(p, latest, { showTrackBadge: false }))
                     .join('')}
                   ${
                     overflow > 0
@@ -436,8 +570,8 @@
 
         host.innerHTML = `
           <p class="text-xs text-slate-500 mb-3">
-            One section per track. Each section shows the latest ${CAP}; drill into
-            the Track page for the full history with filters and search.
+            One section per track. Each section shows the latest ${CAP}; drill
+            into the Track page for the full history with filters and search.
           </p>
           ${sections}
         `;
@@ -447,12 +581,12 @@
       function renderTrackPage(host, arg) {
         const track = TRACKS.includes(arg) ? arg : 'internal';
         chromeTrack(track);
-        const live = livePerTrack(ALL_PATCHES);
+        const latest = latestPerTrackPlatform(ALL_PATCHES);
 
         const state = {
           track,
-          dateRange: 'all', // all | today | 7d | 30d
-          status: 'all', // all | active | inactive | rolled-back
+          dateRange: 'all',
+          status: 'all', // all | latest | rolled-back
           search: '',
           shown: 50,
         };
@@ -460,7 +594,7 @@
         const PAGE = 50;
 
         const render = () => {
-          const liveSet = new Set(Object.values(live).map((p) => p.number));
+          const latestNumbers = latestNumberSet(latest);
           let rows = ALL_PATCHES.filter((p) =>
             state.track === 'all' ? true : p.track === state.track,
           );
@@ -472,14 +606,10 @@
             }[state.dateRange];
             rows = rows.filter((p) => p.ageMs < limit);
           }
-          if (state.status !== 'all') {
-            rows = rows.filter((p) => {
-              if (state.status === 'active') return liveSet.has(p.number);
-              if (state.status === 'rolled-back') return p.rolledBack;
-              if (state.status === 'inactive')
-                return !liveSet.has(p.number) && !p.rolledBack;
-              return true;
-            });
+          if (state.status === 'latest') {
+            rows = rows.filter((p) => latestNumbers.has(p.number));
+          } else if (state.status === 'rolled-back') {
+            rows = rows.filter((p) => p.rolledBack);
           }
           if (state.search) {
             const q = state.search.toLowerCase();
@@ -496,7 +626,6 @@
           const totalMatching = rows.length;
           const visible = rows.slice(0, state.shown);
 
-          // bucket the visible patches by time
           const buckets = [];
           let currentBucket = null;
           for (const p of visible) {
@@ -529,8 +658,7 @@
             .join(' ');
           const statusChips = [
             ['all', 'All'],
-            ['active', 'Active'],
-            ['inactive', 'Inactive'],
+            ['latest', 'Latest'],
             ['rolled-back', 'Rolled back'],
           ]
             .map(([k, l]) => chipBtn(k, l, state.status, 'status'))
@@ -547,9 +675,7 @@
                 <div class="flex gap-1.5 flex-wrap">${dateChips}</div>
               </div>
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">
-                  Status <span class="text-amber-600">(open)</span>
-                </span>
+                <span class="text-xs uppercase tracking-wide text-slate-500 w-20">Status</span>
                 <div class="flex gap-1.5 flex-wrap">${statusChips}</div>
               </div>
               <div class="flex items-center gap-2 flex-wrap">
@@ -592,7 +718,7 @@
                           <div class="divide-y divide-slate-100">
                             ${b.rows
                               .map((p) =>
-                                patchRow(p, live, {
+                                patchRow(p, latest, {
                                   showTrackBadge: state.track === 'all',
                                 }),
                               )
@@ -633,7 +759,6 @@
           const chip = e.target.closest('[data-group]');
           if (chip) {
             state[chip.dataset.group] = chip.dataset.value;
-            // Update URL hash if track changed so deep links stay shareable
             if (chip.dataset.group === 'track') {
               location.hash = `e/${chip.dataset.value}`;
               chromeTrack(chip.dataset.value);
@@ -654,19 +779,19 @@
       // C — Track summary cards + filterable list below
       function renderSummaryPlusList(host) {
         chromeRelease();
-        const live = livePerTrack(ALL_PATCHES);
+        const latest = latestPerTrackPlatform(ALL_PATCHES);
         let trackFilter = 'all';
         let latestOnly = false;
 
         const render = () => {
-          const liveSet = new Set(Object.values(live).map((p) => p.number));
+          const latestNumbers = latestNumberSet(latest);
           let rows = ALL_PATCHES;
           if (trackFilter !== 'all')
             rows = rows.filter((p) => p.track === trackFilter);
-          if (latestOnly) rows = rows.filter((p) => liveSet.has(p.number));
+          if (latestOnly) rows = rows.filter((p) => latestNumbers.has(p.number));
 
           const summaryCards = TRACKS.map((t) => {
-            const p = live[t];
+            const trackLatest = latest[t] || {};
             const trackCount = patchesByTrack(t).length;
             const promoteCta =
               t === 'stable'
@@ -682,14 +807,7 @@
                   )}">${t}</span>
                   <span class="text-xs text-slate-500">${trackCount} total</span>
                 </div>
-                ${
-                  p
-                    ? `<div class="font-medium tabular-nums">Patch #${p.number}</div>
-                       <div class="text-xs text-slate-500 mt-0.5">${fmtAge(
-                         p.ageMs,
-                       )}</div>`
-                    : `<div class="text-sm text-slate-400 italic">No live patch</div>`
-                }
+                <div class="text-sm">${latestSummaryHtml(trackLatest)}</div>
                 ${promoteCta}
               </div>`;
           }).join('');
@@ -707,7 +825,7 @@
 
           return `
             <p class="text-xs uppercase tracking-wide text-slate-500 mb-2">
-              Live on each track
+              Latest on each track
             </p>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
               ${summaryCards}
@@ -722,11 +840,11 @@
                 <input id="latest-toggle-c" type="checkbox" ${
                   latestOnly ? 'checked' : ''
                 } class="size-4" />
-                Latest per track only
+                Latest per (track, platform) only
               </label>
             </div>
             <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
-              ${rows.map((p) => patchRow(p, live)).join('')}
+              ${rows.map((p) => patchRow(p, latest)).join('')}
             </div>`;
         };
 
@@ -748,7 +866,7 @@
       // Baseline — flat list of every patch.
       function renderToday(host) {
         chromeRelease();
-        const live = livePerTrack(ALL_PATCHES);
+        const latest = latestPerTrackPlatform(ALL_PATCHES);
         host.innerHTML = `
           <p class="text-sm text-slate-500 mb-3">
             ${ALL_PATCHES.length} patches, newest first. No track grouping,
@@ -756,7 +874,7 @@
             we're solving.
           </p>
           <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
-            ${ALL_PATCHES.map((p) => patchRow(p, live)).join('')}
+            ${ALL_PATCHES.map((p) => patchRow(p, latest)).join('')}
           </div>
         `;
       }
@@ -764,12 +882,12 @@
       // A — Latest-only toggle (earlier exploration)
       function renderLatestToggle(host) {
         chromeRelease();
-        const live = livePerTrack(ALL_PATCHES);
-        const liveSet = new Set(Object.values(live).map((p) => p.number));
+        const latest = latestPerTrackPlatform(ALL_PATCHES);
+        const latestNumbers = latestNumberSet(latest);
         let latestOnly = true;
         const render = () => {
           const rows = ALL_PATCHES.filter((p) =>
-            latestOnly ? liveSet.has(p.number) : true,
+            latestOnly ? latestNumbers.has(p.number) : true,
           );
           return `
             <div class="flex items-center justify-between mb-3">
@@ -780,11 +898,11 @@
                 <input id="latest-toggle" type="checkbox" ${
                   latestOnly ? 'checked' : ''
                 } class="size-4" />
-                Show only the latest patch per track
+                Show only the latest patch per (track, platform)
               </label>
             </div>
             <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
-              ${rows.map((p) => patchRow(p, live)).join('')}
+              ${rows.map((p) => patchRow(p, latest)).join('')}
             </div>`;
         };
         host.innerHTML = render();
@@ -799,7 +917,7 @@
       // B — Track filter (earlier exploration)
       function renderTrackFilter(host) {
         chromeRelease();
-        const live = livePerTrack(ALL_PATCHES);
+        const latest = latestPerTrackPlatform(ALL_PATCHES);
         let current = 'internal';
         const render = () => {
           const rows = ALL_PATCHES.filter(
@@ -829,7 +947,7 @@
               </p>
             </div>
             <div class="scroll-shell border border-slate-200 rounded-md divide-y divide-slate-100">
-              ${rows.map((p) => patchRow(p, live)).join('')}
+              ${rows.map((p) => patchRow(p, latest)).join('')}
             </div>`;
         };
         host.innerHTML = render();
@@ -877,7 +995,6 @@
         v.render(fresh, arg);
       }
 
-      // Render tabs
       const tabs = document.getElementById('tabs');
       let renderedSep = false;
       tabs.innerHTML = VARIANTS.map((v) => {
