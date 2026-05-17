@@ -356,6 +356,46 @@
           .join('<span class="text-slate-300 mx-1.5">·</span>');
       }
 
+      // Deterministic fake artifacts so the patch detail page has something
+      // plausible to render. Real artifacts come back from the API with arch,
+      // size, content hash, etc.
+      function fakeArtifacts(patch) {
+        const items = [];
+        const sha = (offset) => {
+          let seed = (patch.number * 7919 + offset) >>> 0;
+          let out = '';
+          for (let i = 0; i < 12; i++) {
+            seed = (seed * 1103515245 + 12345) >>> 0;
+            out += (seed & 0xff).toString(16).padStart(2, '0');
+          }
+          return out;
+        };
+        for (const platform of patch.platforms) {
+          if (platform === 'android') {
+            items.push({
+              platform,
+              arch: 'arm64-v8a',
+              sizeMb: 12.4,
+              sha: sha(0),
+            });
+            items.push({
+              platform,
+              arch: 'armeabi-v7a',
+              sizeMb: 11.8,
+              sha: sha(1),
+            });
+          } else if (platform === 'ios') {
+            items.push({
+              platform,
+              arch: 'arm64',
+              sizeMb: 14.1,
+              sha: sha(2),
+            });
+          }
+        }
+        return items;
+      }
+
       // -------- shared row --------
       function publicNotesPreview(s) {
         if (!s) return '';
@@ -420,7 +460,7 @@
                </span>`;
 
         return `
-        <div class="flex items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50">
+        <div data-patch="${patch.number}" class="cursor-pointer flex items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50">
           <div class="flex items-start gap-3 min-w-0 flex-1">
             <span class="shrink-0 leading-6 text-base whitespace-nowrap">${platformsHtml(patch)}</span>
             <div class="min-w-0 flex-1">
@@ -935,6 +975,194 @@
         });
       }
 
+      // F — Patch detail. Hash is "#f/<number>". Defaults to a curated patch
+      // with notes so the page is interesting when reached via the tab.
+      function renderPatchDetail(host, arg) {
+        const num = parseInt(arg, 10);
+        const patch = ALL_PATCHES.find((p) => p.number === num);
+        const latest = latestPerTrackPlatform(ALL_PATCHES);
+
+        if (!patch) {
+          document.getElementById('page-chrome').innerHTML = `
+            <div class="flex items-center gap-3">
+              <a href="#d" class="text-xs text-slate-500 hover:text-slate-800">← Release 1.4.2</a>
+              <h2 class="text-lg font-medium">Patch not found</h2>
+            </div>`;
+          host.innerHTML = `
+            <p class="text-sm text-slate-500">
+              No patch #${escapeHtml(arg || '')} in this release.
+              <a class="text-sky-700 hover:underline" href="#f/983">Try patch #983</a>.
+            </p>`;
+          return;
+        }
+
+        const name = patchName(patch);
+        const trackLatest = latest[patch.track] || {};
+        const stableLatest = latest.stable || {};
+
+        document.getElementById('page-chrome').innerHTML = `
+          <div class="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+            <a href="#d" class="hover:text-slate-800">← Release 1.4.2</a>
+            <span class="text-slate-300">/</span>
+            <a href="#e/${patch.track}" class="hover:text-slate-800">
+              Track:
+              <span class="inline-flex items-center text-xs font-medium px-2 py-0.5 ml-1 rounded-full border ${trackBadgeClass(
+                patch.track,
+              )}">${patch.track}</span>
+            </a>
+          </div>
+          <div class="mt-2 flex items-baseline gap-3 flex-wrap">
+            <span class="text-base leading-none whitespace-nowrap">${platformsHtml(patch)}</span>
+            <h2 class="text-lg font-medium tabular-nums">Patch #${patch.number}</h2>
+            ${
+              name
+                ? `<span class="text-slate-700 truncate">“${escapeHtml(name)}”</span>`
+                : ''
+            }
+            ${
+              patch.rolledBack
+                ? `<span class="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                     <span class="inline-block size-2 rounded-full bg-red-400"></span>
+                     Rolled back
+                   </span>`
+                : ''
+            }
+          </div>
+        `;
+
+        // Per-platform state. For each platform the patch covers, show:
+        //   - whether it's the latest on its current track
+        //   - what the stable track currently has on that platform
+        // The customer's primary question is "what happens if I promote this?"
+        const platformLines = patch.platforms
+          .map((plat) => {
+            const isLatestOnTrack = trackLatest[plat]?.number === patch.number;
+            const onStable = stableLatest[plat];
+            const onTrackBlurb = patch.rolledBack
+              ? `<span class="text-red-600">Rolled back</span>`
+              : isLatestOnTrack
+              ? `<span class="text-emerald-700">Latest on ${patch.track}</span>`
+              : `<span class="text-slate-500">Not latest on ${patch.track}</span>`;
+            let promoteBlurb = '';
+            if (patch.track !== 'stable' && !patch.rolledBack) {
+              promoteBlurb = onStable
+                ? ` · would supersede <a href="#f/${onStable.number}" class="text-slate-700 hover:underline tabular-nums">#${onStable.number}</a> on stable (${fmtAge(onStable.ageMs)})`
+                : ` · stable has no patches on ${platformLabel(plat)} yet`;
+            } else if (patch.track === 'stable' && isLatestOnTrack) {
+              promoteBlurb = ' · currently serving';
+            }
+            return `
+              <div class="flex items-center gap-2 text-sm py-1">
+                <span class="text-base leading-none">${platformIcon(plat)}</span>
+                <span class="font-medium w-16">${platformLabel(plat)}</span>
+                <span>${onTrackBlurb}${promoteBlurb}</span>
+              </div>`;
+          })
+          .join('');
+
+        const isLatestOnAny = patch.platforms.some(
+          (p) => trackLatest[p]?.number === patch.number,
+        );
+        const canPromote =
+          isLatestOnAny && patch.track !== 'stable' && !patch.rolledBack;
+
+        const actions = `
+          <div class="flex gap-2 flex-wrap">
+            <button class="px-3 py-2 text-sm font-medium rounded ${
+              canPromote
+                ? 'bg-slate-900 text-white hover:bg-slate-800'
+                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+            }" ${canPromote ? '' : 'disabled'}>
+              Promote to stable
+            </button>
+            <button class="px-3 py-2 text-sm font-medium rounded border border-slate-300 hover:bg-slate-50">
+              Rollback
+            </button>
+            <button class="px-3 py-2 text-sm font-medium rounded border border-slate-300 hover:bg-slate-50">
+              Change track ▾
+            </button>
+          </div>
+        `;
+
+        const privateSection = patch.privateNotes
+          ? `<section>
+               <h3 class="text-xs uppercase tracking-wide text-slate-500 mb-1">
+                 Private notes
+                 <span class="text-slate-400 normal-case font-normal ml-1">— org only</span>
+               </h3>
+               <pre class="text-sm whitespace-pre-wrap font-sans bg-slate-50 border border-slate-200 rounded p-3">${escapeHtml(patch.privateNotes)}</pre>
+             </section>`
+          : `<section>
+               <h3 class="text-xs uppercase tracking-wide text-slate-500 mb-1">Private notes</h3>
+               <div class="text-sm text-slate-400 italic">
+                 No private notes —
+                 <a class="text-sky-700 hover:underline" href="#">add some</a>
+               </div>
+             </section>`;
+
+        const publicSection = patch.publicNotes
+          ? `<section>
+               <div class="flex items-baseline justify-between gap-2 mb-1">
+                 <h3 class="text-xs uppercase tracking-wide text-slate-500">
+                   <span class="text-emerald-700">📡</span> Public notes
+                   <span class="text-slate-400 normal-case font-normal ml-1">
+                     — shipped to devices · ${patch.publicNotes.length} / 4096 chars
+                   </span>
+                 </h3>
+                 <button class="text-xs text-sky-700 hover:underline">Edit →</button>
+               </div>
+               <pre class="text-sm whitespace-pre-wrap font-mono bg-emerald-50 border border-emerald-200 rounded p-3">${escapeHtml(patch.publicNotes)}</pre>
+             </section>`
+          : `<section>
+               <h3 class="text-xs uppercase tracking-wide text-slate-500 mb-1">
+                 <span class="text-emerald-700">📡</span> Public notes
+                 <span class="text-slate-400 normal-case font-normal ml-1">
+                   — shipped to devices
+                 </span>
+               </h3>
+               <div class="text-sm text-slate-400 italic">
+                 No public notes —
+                 <a class="text-sky-700 hover:underline" href="#">add some</a>
+               </div>
+             </section>`;
+
+        const arts = fakeArtifacts(patch);
+        const artifactsSection = `
+          <section>
+            <h3 class="text-xs uppercase tracking-wide text-slate-500 mb-1">Artifacts</h3>
+            <div class="divide-y divide-slate-100 border border-slate-200 rounded">
+              ${arts
+                .map(
+                  (a) => `
+                    <div class="flex items-center gap-3 px-3 py-2 text-sm">
+                      <span class="leading-none">${platformIcon(a.platform)}</span>
+                      <span class="text-slate-600 w-28 truncate">${a.arch}</span>
+                      <span class="tabular-nums w-20 text-slate-700">${a.sizeMb.toFixed(1)} MB</span>
+                      <span class="text-xs text-slate-400 font-mono truncate">sha256:${a.sha}…</span>
+                    </div>`,
+                )
+                .join('')}
+            </div>
+          </section>
+        `;
+
+        host.innerHTML = `
+          <div class="space-y-6">
+            <div>
+              ${platformLines}
+              <div class="text-xs text-slate-500 mt-2">
+                Created ${fmtAge(patch.ageMs)} · correlation key
+                <span class="font-mono">${patch.corrKey}</span>
+              </div>
+            </div>
+            ${actions}
+            ${privateSection}
+            ${publicSection}
+            ${artifactsSection}
+          </div>
+        `;
+      }
+
       // -------- tabs / routing --------
       const VARIANTS = [
         {
@@ -943,6 +1171,12 @@
           render: renderGrouped,
         },
         { id: 'e', label: 'E · Track page', render: renderTrackPage },
+        {
+          id: 'f',
+          label: 'F · Patch detail',
+          render: renderPatchDetail,
+          defaultArg: '983',
+        },
         { id: 'c', label: 'C · Summary cards + list', render: renderSummaryPlusList },
         { id: 'today', label: 'Today (the problem)', render: renderToday, earlier: true },
         { id: 'a', label: 'A · Latest-only toggle', render: renderLatestToggle, earlier: true },
@@ -951,6 +1185,7 @@
 
       function setActive(id, arg) {
         const v = VARIANTS.find((x) => x.id === id) || VARIANTS[0];
+        if (!arg && v.defaultArg) arg = v.defaultArg;
         const newHash = arg ? `${v.id}/${arg}` : v.id;
         if (location.hash.slice(1) !== newHash) {
           history.replaceState(null, '', `#${newHash}`);
@@ -991,6 +1226,15 @@
         const [id, ...rest] = raw.split('/');
         setActive(id || 'd', rest.join('/') || undefined);
       }
+
+      // Row-click → patch detail page. Ignore clicks on interactive children
+      // (buttons, links, inputs) so they keep their normal behavior.
+      document.addEventListener('click', (e) => {
+        if (e.target.closest('button, a, input, select, textarea, label')) return;
+        const row = e.target.closest('[data-patch]');
+        if (!row) return;
+        location.hash = `f/${row.dataset.patch}`;
+      });
 
       window.addEventListener('hashchange', applyHash);
       applyHash();
