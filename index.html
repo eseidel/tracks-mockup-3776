@@ -93,46 +93,42 @@
       //   Customer-defined format (plain text / JSON / markdown / tier flag).
       //   Per the Public Patch Notes PRD (proposed, not in DB today).
       const NOTES = {
-        // stable Android — promoted from internal with structured device payload
+        // Notes describe what a patch does — they don't track its lifecycle.
+        // The patch number is stable across track moves; promotion doesn't
+        // change it.
         813: {
-          privateNotes:
-            'Promoted from internal #978\nValidated by Android QA May 14',
+          privateNotes: 'Fix camera permission flow on Android 14',
           publicNotes:
             '{"severity":"critical","banner":"Apply security update"}',
         },
-        // stable iOS — older, single-word tier flag
         812: {
-          privateNotes:
-            'Promoted from internal #971\nValidated by iOS QA May 11',
+          privateNotes: 'Fix iOS 17 keyboard crash on checkout',
           publicNotes: 'critical',
         },
-        // newest internal — being curated for promotion
         995: {
-          privateNotes: 'Smoke test before promoting to stable',
+          privateNotes: 'Investigate stuck spinner on cold start',
           publicNotes: '',
         },
         993: {
-          privateNotes:
-            'Trying new dart_ffi flags / probably won’t promote',
+          privateNotes: 'Try new dart_ffi flags for image decoding',
           publicNotes: '',
         },
-        // fix that ALC-style customer would tag as critical
         980: {
           privateNotes:
             'Fix crash reported by support\n(see ticket #4218)',
           publicNotes: 'critical',
         },
         966: {
-          privateNotes: 'QA test for the nav redesign — Aisha',
+          privateNotes: 'Wire up new nav copy — needs design review',
           publicNotes: 'stealth',
         },
         922: {
-          privateNotes: 'Build with experimental compression',
+          privateNotes: 'Experimental brotli compression on patch payload',
           publicNotes: 'standard',
         },
-        // rolled-back internal we kept around for the note
+        // rolled back — the note describes the change, not "it failed QA"
         859: {
-          privateNotes: 'Failed manual QA — keep for postmortem',
+          privateNotes: 'Try experimental analytics serialization codec',
           publicNotes: '',
         },
         // beta with public-facing notes only — markdown, cross-platform
