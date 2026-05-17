@@ -49,8 +49,7 @@
           still under discussion.
         </p>
         <p>
-          <span class="text-slate-400">🔒</span> = private notes (org-only).
-          Name = first line of private notes when present.
+          Patch name = first line of private notes when present.
           <span class="text-emerald-700">📡</span> = public notes (free-form
           text payload shipped to devices via the patch check response, per the
           Public Patch Notes PRD).
@@ -244,8 +243,7 @@
         const primary = name
           ? `<span class="font-medium truncate" title="${escapeHtml(
               patch.privateNotes,
-            )}">“${escapeHtml(name)}”</span>
-             <span class="shrink-0 text-slate-400 text-xs" title="Private — only your team sees this">🔒</span>`
+            )}">“${escapeHtml(name)}”</span>`
           : `<span class="font-medium tabular-nums shrink-0">Patch #${patch.number}</span>`;
 
         // Secondary line shown when either:
@@ -417,7 +415,7 @@
                     }
                   </div>
                   <a href="#e/${t}" class="text-xs font-medium text-sky-700 hover:text-sky-900">
-                    View all ${trackPatches.length} on this track →
+                    View all →
                   </a>
                 </div>
                 <div class="divide-y divide-slate-100">
@@ -427,7 +425,7 @@
                   ${
                     overflow > 0
                       ? `<a href="#e/${t}" class="block text-center px-4 py-2 text-xs text-slate-500 hover:bg-slate-50">
-                           ${overflow} more on ${t} →
+                           ${overflow} more →
                          </a>`
                       : ''
                   }
